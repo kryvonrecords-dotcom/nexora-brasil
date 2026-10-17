@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#002776"/>
+      <stop offset="50%" stop-color="#071526"/>
+      <stop offset="100%" stop-color="#04121F"/>
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00C853"/>
+      <stop offset="50%" stop-color="#00A84D"/>
+      <stop offset="100%" stop-color="#00843D"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#00843D" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+  
+  <!-- Rounded App Icon Background -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)"/>
+  <rect width="504" height="504" x="4" y="4" rx="108" fill="none" stroke="#00843D" stroke-opacity="0.3" stroke-width="4"/>
+  
+  <!-- Stylized Modern 'N' Logo for Nexora Brasil -->
+  <g filter="url(#glow)">
+    <!-- Left Column -->
+    <path d="M 128 384 L 128 128 L 184 128 L 184 384 Z" fill="#FFFFFF"/>
+    
+    <!-- Diagonal Dynamic Ribbon in Brazilian Green -->
+    <path d="M 184 128 L 328 384 L 384 384 L 240 128 Z" fill="url(#accentGrad)"/>
+    
+    <!-- Right Column -->
+    <path d="M 328 128 L 384 128 L 384 384 L 328 384 Z" fill="#FFFFFF"/>
+  </g>
+  
+  <!-- Live Signal / Pulse Dot on Top Right in Brazilian Solar Gold -->
+  <circle cx="396" cy="116" r="20" fill="#FFB800"/>
+  <circle cx="396" cy="116" r="28" fill="none" stroke="#FFB800" stroke-width="4" opacity="0.65"/>
+</svg>

@@ -1,0 +1,132 @@
+import express from 'express';
+import path from 'path';
+import fs from 'fs';
+import { createServer as createViteServer } from 'vite';
+import routes from './server/routes';
+import { db } from './server/db';
+
+async function startServer() {
+  const app = express();
+  const PORT = Number(process.env.PORT) || 3000;
+
+  // JSON and URL-encoded body parsers
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+  // Static uploads directory for serving uploaded real images
+  const uploadsDir = path.join(process.cwd(), 'uploads');
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+  app.use('/uploads', express.static(uploadsDir));
+
+  // Fallback for /uploads/* if image file was deleted, lost after restart, or not found on disk
+  app.get('/uploads/*', (req, res) => {
+    const filename = path.basename(req.path || '');
+    const svgFallback = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675" width="1200" height="675">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0B132B"/>
+      <stop offset="100%" stop-color="#1C2541"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#146EF5"/>
+      <stop offset="100%" stop-color="#38BDF8"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="675" fill="url(#bg)"/>
+  <circle cx="1000" cy="150" r="220" fill="#146EF5" opacity="0.08"/>
+  <g transform="translate(600, 280) scale(1.6)" opacity="0.95">
+    <circle cx="0" cy="0" r="48" fill="rgba(0,132,61,0.12)" stroke="#00843D" stroke-width="2"/>
+    <path d="M-18 -18 L18 -18 C20 -18 22 -16 22 -14 L22 18 C22 20 20 22 18 22 L-18 22 C-20 22 -22 20 -22 18 L-22 -14 C-22 -16 -20 -18 -18 -18 Z" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"/>
+    <line x1="-14" y1="-10" x2="4" y2="-10" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round"/>
+    <line x1="-14" y1="-3" x2="4" y2="-3" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round"/>
+    <line x1="-14" y1="4" x2="14" y2="4" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round"/>
+    <line x1="-14" y1="11" x2="14" y2="11" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round"/>
+    <rect x="8" y="-12" width="6" height="10" fill="#FFB800" rx="1"/>
+  </g>
+  <g transform="translate(600, 520)" text-anchor="middle">
+    <text x="0" y="0" fill="#ffffff" font-family="'Georgia', serif" font-size="34" font-weight="bold">NEXORA BRASIL</text>
+    <text x="0" y="40" fill="#94A3B8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="500" letter-spacing="2">JORNALISMO DE EXCELÊNCIA EM TEMPO REAL</text>
+  </g>
+</svg>`;
+    res.setHeader('Content-Type', 'image/svg+xml');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(svgFallback);
+  });
+
+  // Dynamic SEO Sitemap
+  app.get('/sitemap.xml', (req, res) => {
+    const news = db.getPublishedNews();
+    const categories = db.getCategories();
+    const baseUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
+
+    let xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`;
+    // Home
+    xml += `  <url>\n    <loc>${baseUrl}/</loc>\n    <changefreq>hourly</changefreq>\n    <priority>1.0</priority>\n  </url>\n`;
+    
+    // Categories
+    categories.forEach(c => {
+      xml += `  <url>\n    <loc>${baseUrl}/categoria/${c.slug}</loc>\n    <changefreq>daily</changefreq>\n    <priority>0.8</priority>\n  </url>\n`;
+    });
+
+    // News articles
+    news.forEach(n => {
+      xml += `  <url>\n    <loc>${baseUrl}/noticia/${n.slug}</loc>\n    <lastmod>${new Date(n.updatedAt || n.publishedAt).toISOString().split('T')[0]}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.9</priority>\n  </url>\n`;
+    });
+
+    // Institutional
+    ['sobre', 'contactos', 'privacidade', 'termos'].forEach(page => {
+      xml += `  <url>\n    <loc>${baseUrl}/${page}</loc>\n    <changefreq>monthly</changefreq>\n    <priority>0.5</priority>\n  </url>\n`;
+    });
+
+    xml += `</urlset>`;
+    res.header('Content-Type', 'application/xml');
+    res.send(xml);
+  });
+
+  // Robots.txt
+  app.get('/robots.txt', (req, res) => {
+    const baseUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
+    const txt = `User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /api/admin\n\nSitemap: ${baseUrl}/sitemap.xml\n`;
+    res.header('Content-Type', 'text/plain');
+    res.send(txt);
+  });
+
+  // Mount API routes
+  app.use('/api', routes);
+
+  // Health check
+  app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok', time: new Date().toISOString() });
+  });
+
+  // Catch-all 404 for unhandled API routes to ensure JSON response
+  app.all('/api/*', (req, res) => {
+    res.status(404).json({ error: `Rota da API não encontrada: ${req.method} ${req.path}` });
+  });
+
+  // Vite middleware for dev / static for production
+  if (process.env.NODE_ENV !== 'production') {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Nexora Brasil Server running on http://0.0.0.0:${PORT}`);
+  });
+}
+
+startServer().catch(err => {
+  console.error('Failed to start server:', err);
+});

@@ -1,0 +1,32 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Android build outputs & local caches
+.gradle/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+*.iml
+.idea/
+.cxx/
+
+# Dados privados e base de dados local
+data/nexora_news.json
+data/vapid_keys.json
+
+# Imagens e ficheiros enviados pelo painel
+uploads/*
+!uploads/.gitkeep
+
+# Segredos e configurações locais
+.env
+.env.*
+!.env.example
