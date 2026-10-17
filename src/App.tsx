@@ -30,6 +30,8 @@ import { AdminNewsEditor } from './pages/Admin/AdminNewsEditor';
 import { AdminNotifications } from './pages/Admin/AdminNotifications';
 import { AdminCategories } from './pages/Admin/AdminCategories';
 import { AdminMediaGallery } from './pages/Admin/AdminMediaGallery';
+import { AdminImageSources } from './pages/Admin/AdminImageSources';
+import { AdminRSS } from './pages/Admin/AdminRSS';
 import { AdminAds } from './pages/Admin/AdminAds';
 import { AdminProposals } from './pages/Admin/AdminProposals';
 import { AdminSubscribers } from './pages/Admin/AdminSubscribers';
@@ -210,6 +212,22 @@ function AppContent() {
       return (
         <AdminLayout activeTab="settings" onNavigate={navigate}>
           <AdminSettings onNavigate={navigate} />
+        </AdminLayout>
+      );
+    }
+
+    if (pathname === '/admin/fontes-rss') {
+      return (
+        <AdminLayout activeTab="rss" onNavigate={navigate}>
+          <AdminRSS />
+        </AdminLayout>
+      );
+    }
+
+    if (pathname === '/admin/fontes-imagens') {
+      return (
+        <AdminLayout onNavigate={navigate}>
+          <AdminImageSources />
         </AdminLayout>
       );
     }

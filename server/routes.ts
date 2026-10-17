@@ -7,8 +7,90 @@ import { GoogleGenAI } from '@google/genai';
 import { db } from './db';
 import { generateToken, requireAdmin, AuthenticatedRequest } from './auth';
 import { getVapidPublicKey, sendWebPushToAll } from './webPush';
+import { readRSSFeed } from './rss';
 
 const router = express.Router();
+
+// WIKIMEDIA_IMAGE_SEARCH — pesquisa de imagens com informação de licença
+router.get('/admin/image-sources/wikimedia', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const query = String(req.query.q || '').trim().slice(0, 200);
+
+    if (query.length < 2) {
+      return res.status(400).json({ error: 'Introduza pelo menos 2 caracteres para pesquisar.' });
+    }
+
+    const params = new URLSearchParams({
+      action: 'query',
+      generator: 'search',
+      gsrsearch: query,
+      gsrnamespace: '6',
+      gsrlimit: '20',
+      prop: 'imageinfo',
+      iiprop: 'url|extmetadata',
+      iiurlwidth: '1000',
+      format: 'json',
+      origin: '*'
+    });
+
+    const response = await fetch(
+      `https://commons.wikimedia.org/w/api.php?${params.toString()}`,
+      {
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'NexoraBrasil/1.0 (image search; editorial use)'
+        },
+        signal: AbortSignal.timeout(15000)
+      }
+    );
+
+    if (!response.ok) {
+      return res.status(502).json({ error: 'O Wikimedia Commons não respondeu à pesquisa.' });
+    }
+
+    const data = await response.json() as {
+      query?: {
+        pages?: Record<string, {
+          pageid: number;
+          title: string;
+          imageinfo?: Array<{
+            url?: string;
+            thumburl?: string;
+            descriptionurl?: string;
+            extmetadata?: Record<string, { value?: string }>;
+          }>;
+        }>;
+      };
+    };
+
+    const cleanHtml = (value: string) =>
+      value.replace(/<[^>]*>/g, '').replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
+
+    const images = Object.values(data.query?.pages || {}).map((page) => {
+      const info = page.imageinfo?.[0];
+      const meta = info?.extmetadata || {};
+      return {
+        id: String(page.pageid),
+        title: page.title.replace(/^File:/, ''),
+        imageUrl: info?.thumburl || info?.url || '',
+        originalUrl: info?.url || '',
+        sourceUrl: info?.descriptionurl || '',
+        author: cleanHtml(meta.Artist?.value || meta.Credit?.value || 'Autor não identificado'),
+        license: cleanHtml(meta.LicenseShortName?.value || 'Licença não identificada'),
+        licenseUrl: cleanHtml(meta.LicenseUrl?.value || ''),
+        attributionRequired: meta.AttributionRequired?.value === 'true',
+        description: cleanHtml(meta.ImageDescription?.value || '')
+      };
+    }).filter((image) => image.imageUrl && image.sourceUrl);
+
+    return res.json({ source: 'Wikimedia Commons', images });
+  } catch (error) {
+    console.error('Erro na pesquisa Wikimedia:', error);
+    return res.status(500).json({ error: 'Não foi possível pesquisar imagens neste momento.' });
+  }
+});
+
 
 // Lazy Gemini AI initialization
 let aiClient: GoogleGenAI | null = null;
@@ -259,6 +341,283 @@ router.get('/weather', async (req: Request, res: Response): Promise<void> => {
 });
 
 // ----------------------------------------------------
+
+// RSS_ADMIN_INTEGRATION — gestão e importação segura como rascunhos
+const rssSourcesFile = path.join(process.cwd(), 'data', 'rss_sources.json');
+const rssImportsFile = path.join(process.cwd(), 'data', 'rss_imports.json');
+
+interface RSSSource {
+  id: string;
+  name: string;
+  url: string;
+  categoryId: string;
+  enabled: boolean;
+  createdAt: string;
+  lastCheckedAt?: string;
+  lastError?: string;
+}
+
+function readRSSJson<T>(file: string, fallback: T): T {
+  try {
+    if (!fs.existsSync(file)) return fallback;
+    return JSON.parse(fs.readFileSync(file, 'utf8')) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeRSSJson(file: string, data: unknown): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const temp = `${file}.tmp`;
+  fs.writeFileSync(temp, JSON.stringify(data, null, 2), 'utf8');
+  fs.renameSync(temp, file);
+}
+
+function validateRSSUrl(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length > 2000) return null;
+  try {
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol)) return null;
+    if (url.username || url.password) return null;
+
+    const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    if (
+      host === 'localhost' ||
+      host.endsWith('.localhost') ||
+      host.endsWith('.local') ||
+      host === '::1' ||
+      host === '0.0.0.0' ||
+      /^127\./.test(host) ||
+      /^10\./.test(host) ||
+      /^192\.168\./.test(host) ||
+      /^169\.254\./.test(host) ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+    ) return null;
+
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function cleanRSSHtml(value: string): string {
+  return value
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 1000);
+}
+
+function getRSSSources(): RSSSource[] {
+  return readRSSJson<RSSSource[]>(rssSourcesFile, []);
+}
+
+router.get('/admin/rss/sources', requireAdmin, (_req: Request, res: Response) => {
+  res.json({ sources: getRSSSources() });
+});
+
+router.post('/admin/rss/sources', requireAdmin, (req: AuthenticatedRequest, res: Response) => {
+  const name = String(req.body?.name || '').trim().slice(0, 120);
+  const url = validateRSSUrl(req.body?.url);
+  const categoryId = String(req.body?.categoryId || '');
+  if (!name || !url || !categoryId) {
+    res.status(400).json({ error: 'Informe nome, URL pública válida e categoria.' });
+    return;
+  }
+
+  if (!db.getCategoryById(categoryId)) {
+    res.status(400).json({ error: 'A categoria selecionada não existe.' });
+    return;
+  }
+
+  const sources = getRSSSources();
+  if (sources.some(source => source.url === url)) {
+    res.status(409).json({ error: 'Esta fonte RSS já está registada.' });
+    return;
+  }
+
+  const source: RSSSource = {
+    id: `rss-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name,
+    url,
+    categoryId,
+    enabled: true,
+    createdAt: new Date().toISOString()
+  };
+
+  sources.push(source);
+  writeRSSJson(rssSourcesFile, sources);
+  res.status(201).json({ message: 'Fonte RSS adicionada.', source });
+});
+
+router.delete('/admin/rss/sources/:id', requireAdmin, (req: AuthenticatedRequest, res: Response) => {
+  const sources = getRSSSources();
+  const remaining = sources.filter(source => source.id !== req.params.id);
+  if (remaining.length === sources.length) {
+    res.status(404).json({ error: 'Fonte RSS não encontrada.' });
+    return;
+  }
+  writeRSSJson(rssSourcesFile, remaining);
+  res.json({ message: 'Fonte RSS removida.' });
+});
+
+router.post('/admin/rss/test', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const url = validateRSSUrl(req.body?.url);
+  if (!url) {
+    res.status(400).json({ error: 'URL inválida ou endereço não permitido.' });
+    return;
+  }
+
+  try {
+    const feed = await readRSSFeed(url);
+    res.json({
+      success: true,
+      title: feed.title,
+      description: feed.description,
+      feedUrl: feed.feedUrl,
+      itemsFound: feed.items.length,
+      examples: feed.items.slice(0, 5).map(item => ({
+        title: item.title,
+        link: item.link,
+        pubDate: item.isoDate || item.pubDate,
+        hasImage: Boolean(item.imageUrl)
+      }))
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Erro ao ler o feed.';
+    res.status(502).json({ error: message });
+  }
+});
+
+router.post('/admin/rss/import', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const sourceId = String(req.body?.sourceId || '');
+  const sources = getRSSSources();
+  const source = sources.find(item => item.id === sourceId && item.enabled);
+
+  if (!source) {
+    res.status(404).json({ error: 'Fonte RSS não encontrada ou desativada.' });
+    return;
+  }
+
+  const category = db.getCategoryById(source.categoryId);
+  if (!category) {
+    res.status(400).json({ error: 'A categoria desta fonte já não existe. Atualize a fonte.' });
+    return;
+  }
+
+  try {
+    const feed = await readRSSFeed(source.url);
+    const imported = readRSSJson<string[]>(rssImportsFile, []);
+    const importedSet = new Set(imported);
+    const createdItems: string[] = [];
+    let skipped = 0;
+
+    for (const item of feed.items.slice(0, 30)) {
+      const link = validateRSSUrl(item.link);
+      if (!link) {
+        skipped++;
+        continue;
+      }
+
+      const fingerprint = `${source.id}|${item.guid || link}`;
+      if (importedSet.has(fingerprint)) {
+        skipped++;
+        continue;
+      }
+
+      const title = cleanRSSHtml(item.title).slice(0, 220);
+      const excerpt = cleanRSSHtml(item.contentSnippet || item.content || title).slice(0, 500);
+      if (!title) {
+        skipped++;
+        continue;
+      }
+
+      let slug = slugify(title) || `noticia-rss-${Date.now()}`;
+      let counter = 1;
+      while (db.getNewsBySlug(slug)) {
+        slug = `${slugify(title)}-${counter++}`;
+      }
+
+      const imageUrl = validateRSSUrl(item.imageUrl) || '';
+      const published = item.isoDate || item.pubDate;
+      const parsedDate = published ? new Date(published) : new Date();
+      const publishedAt = Number.isNaN(parsedDate.getTime())
+        ? new Date().toISOString()
+        : parsedDate.toISOString();
+
+      const created = db.createNews({
+        title,
+        slug,
+        excerpt: excerpt || title,
+        content: `<p>${excerpt || title}</p><p>Leia a notícia completa na fonte original: <a href="${link}" target="_blank" rel="noopener noreferrer">${source.name.replace(/[<>&"]/g, '')}</a>.</p>`,
+        featuredImage: imageUrl || '',
+        featuredImageCaption: imageUrl ? `Imagem fornecida pelo feed ${source.name}` : undefined,
+        galleryImages: [],
+        categoryId: category.id,
+        authorId: 'rss-import',
+        authorName: source.name,
+        authorRole: 'Fonte RSS — revisão editorial pendente',
+        tags: ['RSS', 'Revisão editorial'],
+        status: 'draft',
+        isBreaking: false,
+        isHero: false,
+        publishedAt
+      });
+
+      importedSet.add(fingerprint);
+      createdItems.push(created.id);
+    }
+
+    writeRSSJson(rssImportsFile, Array.from(importedSet));
+
+    const latestSources = getRSSSources().map(item =>
+      item.id === source.id
+        ? { ...item, lastCheckedAt: new Date().toISOString(), lastError: undefined }
+        : item
+    );
+    writeRSSJson(rssSourcesFile, latestSources);
+
+    res.json({
+      success: true,
+      source: source.name,
+      feedTitle: feed.title,
+      imported: createdItems.length,
+      skipped,
+      newsIds: createdItems,
+      message: `${createdItems.length} notícia(s) importada(s) como rascunho.`
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Erro ao importar o feed.';
+    const latestSources = getRSSSources().map(item =>
+      item.id === source.id
+        ? { ...item, lastCheckedAt: new Date().toISOString(), lastError: message }
+        : item
+    );
+    writeRSSJson(rssSourcesFile, latestSources);
+    res.status(502).json({ error: message });
+  }
+});
+
+router.get('/admin/rss/status', requireAdmin, (_req: Request, res: Response) => {
+  const sources = getRSSSources();
+  const imported = readRSSJson<string[]>(rssImportsFile, []);
+  res.json({
+    sourcesCount: sources.length,
+    enabledSources: sources.filter(source => source.enabled).length,
+    importedItemsTracked: imported.length,
+    parserAvailable: true
+  });
+});
+
+
 // PUBLIC NEWS & CONTENT
 // ----------------------------------------------------
 router.get('/news', (req: Request, res: Response): void => {

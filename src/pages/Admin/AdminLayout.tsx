@@ -1,18 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  LayoutDashboard, 
-  FileText, 
-  PlusCircle, 
-  Layers, 
-  Image as ImageIcon, 
-  Users, 
-  Mail, 
-  Settings, 
-  KeyRound, 
-  LogOut, 
-  ExternalLink, 
-  Menu, 
-  X, 
+import {
+  LayoutDashboard,
+  FileText,
+  PlusCircle,
+  Layers,
+  Image as ImageIcon,
+  Rss,
+  Users,
+  Mail,
+  Settings,
+  KeyRound,
+  LogOut,
+  ExternalLink,
+  Menu,
+  X,
   ShieldCheck,
   Bell,
   Megaphone,
@@ -55,10 +56,10 @@ export function AdminLayout({ activeTab, onNavigate, children }: Props) {
     { id: 'dashboard', label: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
     { id: 'news-list', label: 'Todas as Notícias', path: '/admin/noticias', icon: FileText },
     { id: 'news-new', label: 'Nova Notícia', path: '/admin/noticias/nova', icon: PlusCircle, highlight: true },
-    { 
-      id: 'proposals', 
-      label: 'Propostas Comerciais', 
-      path: '/admin/propostas', 
+    {
+      id: 'proposals',
+      label: 'Propostas Comerciais',
+      path: '/admin/propostas',
       icon: Briefcase,
       badge: pendingProposalsCount > 0 ? pendingProposalsCount : undefined
     },
@@ -66,6 +67,8 @@ export function AdminLayout({ activeTab, onNavigate, children }: Props) {
     { id: 'notifications', label: 'Notificações Push', path: '/admin/notificacoes', icon: Bell },
     { id: 'categories', label: 'Categorias', path: '/admin/categorias', icon: Layers },
     { id: 'media', label: 'Galeria de Mídia', path: '/admin/midia', icon: ImageIcon },
+    { id: 'admin-image-sources', label: 'Fontes de Imagens', path: '/admin/fontes-imagens', icon: ImageIcon },
+    { id: 'rss', label: 'Fontes RSS', path: '/admin/fontes-rss', icon: Rss },
     { id: 'subscribers', label: 'Newsletter', path: '/admin/subscritores', icon: Mail },
     { id: 'social-media', label: 'Redes Sociais', path: '/admin/redes-sociais', icon: Share2 },
     { id: 'settings', label: 'Configurações', path: '/admin/configuracoes', icon: Settings },
@@ -96,15 +99,15 @@ export function AdminLayout({ activeTab, onNavigate, children }: Props) {
               {mobileSidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
 
-            <div 
+            <div
               onClick={() => handleNav('/admin/dashboard')}
               className="flex items-center gap-2.5 cursor-pointer select-none"
             >
               <div className="w-8 h-8 rounded-full overflow-hidden shrink-0 shadow ring-1 ring-[#00843D]/40 bg-[#071526] flex items-center justify-center">
-                <img 
-                  src="/icon-192.svg" 
-                  alt="Nexora Admin Logo" 
-                  className="w-full h-full object-cover" 
+                <img
+                  src="/icon-192.svg"
+                  alt="Nexora Admin Logo"
+                  className="w-full h-full object-cover"
                   onError={(e) => {
                     (e.currentTarget as HTMLImageElement).src = '/app-cover.jpg';
                   }}
