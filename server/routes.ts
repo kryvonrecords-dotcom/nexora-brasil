@@ -557,6 +557,7 @@ router.post('/admin/rss/import', requireAdmin, async (req: AuthenticatedRequest,
         title,
         slug,
         excerpt: excerpt || title,
+        readTimeMinutes: Math.max(1, Math.ceil((excerpt || title).split(/\s+/).length / 200)),
         content: `<p>${excerpt || title}</p><p>Leia a notícia completa na fonte original: <a href="${link}" target="_blank" rel="noopener noreferrer">${source.name.replace(/[<>&"]/g, '')}</a>.</p>`,
         featuredImage: imageUrl || '',
         featuredImageCaption: imageUrl ? `Imagem fornecida pelo feed ${source.name}` : undefined,
@@ -564,9 +565,9 @@ router.post('/admin/rss/import', requireAdmin, async (req: AuthenticatedRequest,
         categoryId: category.id,
         authorId: 'rss-import',
         authorName: source.name,
-        authorRole: 'Fonte RSS — revisão editorial pendente',
-        tags: ['RSS', 'Revisão editorial'],
-        status: 'draft',
+        authorRole: 'Fonte RSS',
+        tags: ['RSS'],
+        status: 'published',
         isBreaking: false,
         isHero: false,
         publishedAt
@@ -1966,5 +1967,131 @@ router.use((err: any, req: Request, res: Response, next: any) => {
   }
   next();
 });
+
+
+let rssAutoImportRunning = false;
+
+export async function runRSSAutoImport(): Promise<void> {
+  if (rssAutoImportRunning) {
+    console.log('[RSS automático] Verificação anterior ainda em execução.');
+    return;
+  }
+
+  rssAutoImportRunning = true;
+
+  try {
+    const sources = getRSSSources().filter(source => source.enabled);
+
+    for (const source of sources) {
+      try {
+        const category = db.getCategoryById(source.categoryId);
+        if (!category) {
+          throw new Error(`Categoria não encontrada: ${source.categoryId}`);
+        }
+
+        const feed = await readRSSFeed(source.url);
+        const importedSet = new Set(readRSSJson<string[]>(rssImportsFile, []));
+        let importedCount = 0;
+        let skipped = 0;
+
+        for (const item of feed.items.slice(0, 30)) {
+          const link = validateRSSUrl(item.link);
+          if (!link) {
+            skipped++;
+            continue;
+          }
+
+          const fingerprint = `${source.id}|${item.guid || link}`;
+          if (importedSet.has(fingerprint)) {
+            skipped++;
+            continue;
+          }
+
+          const title = cleanRSSHtml(item.title || '').slice(0, 220);
+          if (!title) {
+            skipped++;
+            continue;
+          }
+
+          const excerpt = cleanRSSHtml(
+            item.contentSnippet || item.content || title
+          ).slice(0, 500);
+
+          const baseSlug = slugify(title) || `noticia-rss-${Date.now()}`;
+          let slug = baseSlug;
+          let counter = 1;
+
+          while (db.getNewsBySlug(slug)) {
+            slug = `${baseSlug}-${counter++}`;
+          }
+
+          const imageUrl = validateRSSUrl(item.imageUrl) || '';
+          const published = item.isoDate || item.pubDate;
+          const parsedDate = published ? new Date(published) : new Date();
+          const publishedAt = Number.isNaN(parsedDate.getTime())
+            ? new Date().toISOString()
+            : parsedDate.toISOString();
+
+          const created = db.createNews({
+            title,
+            slug,
+            excerpt: excerpt || title,
+            readTimeMinutes: Math.max(1, Math.ceil((excerpt || title).split(/\s+/).length / 200)),
+            content: `<p>${excerpt || title}</p><p>Leia a notícia completa na fonte original: <a href="${link}" target="_blank" rel="noopener noreferrer">${source.name.replace(/[<>&"]/g, '')}</a>.</p>`,
+            featuredImage: imageUrl,
+            featuredImageCaption: imageUrl
+              ? `Imagem fornecida pelo feed ${source.name}`
+              : undefined,
+            galleryImages: [],
+            categoryId: category.id,
+            authorId: 'rss-import',
+            authorName: source.name,
+            authorRole: 'Fonte RSS',
+            tags: ['RSS'],
+            status: 'published',
+            isBreaking: false,
+            isHero: false,
+            publishedAt
+          });
+
+          importedSet.add(fingerprint);
+          importedCount++;
+        }
+
+        writeRSSJson(rssImportsFile, Array.from(importedSet));
+        const latestSources = getRSSSources().map(item =>
+          item.id === source.id
+            ? {
+                ...item,
+                lastCheckedAt: new Date().toISOString(),
+                lastError: undefined
+              }
+            : item
+        );
+        writeRSSJson(rssSourcesFile, latestSources);
+
+        console.log(
+          `[RSS automático] ${source.name}: ${importedCount} publicada(s), ${skipped} ignorada(s).`
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Erro desconhecido';
+        const latestSources = getRSSSources().map(item =>
+          item.id === source.id
+            ? {
+                ...item,
+                lastCheckedAt: new Date().toISOString(),
+                lastError: message
+              }
+            : item
+        );
+        writeRSSJson(rssSourcesFile, latestSources);
+        console.error(`[RSS automático] Erro em ${source.name}: ${message}`);
+      }
+    }
+  } finally {
+    rssAutoImportRunning = false;
+  }
+}
+
 
 export default router;

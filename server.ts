@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
-import routes from './server/routes';
+import routes, { runRSSAutoImport } from './server/routes';
 import { db } from './server/db';
 
 async function startServer() {

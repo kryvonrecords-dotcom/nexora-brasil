@@ -1,0 +1,26 @@
+[
+  {
+    "name": "Agência Brasil",
+    "url": "https://agenciabrasil.ebc.com.br/feed/ultimasnoticias/feed.xml",
+    "categoryId": "cat-brasil",
+    "enabled": true,
+    "id": "rss-1792304657195-5goruo",
+    "createdAt": "2026-10-18T06:24:17.196Z"
+  },
+  {
+    "name": "G1",
+    "url": "https://g1.globo.com/rss/g1/",
+    "categoryId": "cat-brasil",
+    "enabled": true,
+    "id": "rss-1792304657197-efbuou",
+    "createdAt": "2026-10-18T06:24:17.198Z"
+  },
+  {
+    "name": "BBC News - World",
+    "url": "https://feeds.bbci.co.uk/news/world/rss.xml",
+    "categoryId": "cat-mundo",
+    "enabled": true,
+    "id": "rss-1792304657198-1righ8",
+    "createdAt": "2026-10-18T06:24:17.198Z"
+  }
+]

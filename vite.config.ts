@@ -15,6 +15,11 @@ export default defineConfig(() => {
     optimizeDeps: {
       include: ['react', 'react-dom', 'lucide-react'],
     },
+    build: {
+      commonjsOptions: {
+        include: [/node_modules/, /\.bun\/install\/cache/],
+      },
+    },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.

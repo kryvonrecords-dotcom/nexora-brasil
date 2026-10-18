@@ -226,7 +226,7 @@ function AppContent() {
 
     if (pathname === '/admin/fontes-imagens') {
       return (
-        <AdminLayout onNavigate={navigate}>
+        <AdminLayout activeTab="admin-image-sources" onNavigate={navigate}>
           <AdminImageSources />
         </AdminLayout>
       );
