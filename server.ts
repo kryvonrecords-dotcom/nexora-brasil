@@ -127,6 +127,16 @@ async function startServer() {
   });
 }
 
+  // Primeira verificação RSS 15 segundos após o arranque.
+  setTimeout(() => {
+    void runRSSAutoImport();
+  }, 15000);
+
+  // Repetir a verificação RSS a cada cinco minutos.
+  setInterval(() => {
+    void runRSSAutoImport();
+  }, 5 * 60 * 1000);
+
 startServer().catch(err => {
   console.error('Failed to start server:', err);
 });
